@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Artificial Life Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #1a202c; /* Tailwind gray-900 */
+            color: #e2e8f0; /* Tailwind gray-300 */
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars from canvas behavior */
+        }
+        #simulationCanvas {
+            border: 1px solid #4a5568; /* Tailwind gray-600 */
+            background-color: #2d3748; /* Tailwind gray-800 */
+            display: block; /* Remove extra space below canvas */
+            border-radius: 0.5rem; /* Rounded corners */
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .control-button {
+            background-color: #4299e1; /* Tailwind blue-500 */
+            color: white;
+            font-weight: bold;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 0.375rem; /* Rounded corners */
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .control-button:hover {
+            background-color: #3182ce; /* Tailwind blue-600 */
+        }
+        .control-button:active {
+            background-color: #2b6cb0; /* Tailwind blue-700 */
+        }
+        #messageBox {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #f56565; /* Tailwind red-500 */
+            color: white;
+            padding: 10px 20px;
+            border-radius: 0.375rem;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .settings-panel {
+            background-color: #2d3748; /* Tailwind gray-800 */
+            padding: 15px;
+            border-radius: 0.5rem;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .settings-panel label {
+            margin-right: 5px;
+            font-size: 0.9rem;
+        }
+        .settings-panel input[type="range"], .settings-panel input[type="number"], .settings-panel select {
+            background-color: #4a5568; /* Tailwind gray-600 */
+            border: 1px solid #718096; /* Tailwind gray-500 */
+            border-radius: 0.25rem;
+            padding: 5px;
+            color: #e2e8f0; /* Tailwind gray-300 */
+        }
+        .settings-panel input[type="number"] {
+            width: 70px;
+        }
+
+    </style>
+</head>
+<body>
+    <h1 class="text-3xl font-bold mb-4 text-center">Artificial Life Simulation</h1>
+    <p class="mb-4 text-sm text-gray-400 text-center max-w-xl">
+        Watch particles interact to form emergent structures.
+        Blue particles (Protons) attract Green (Electrons) and Red (Neutrons).
+        Green particles repel each other. Red particles are neutral but add mass/stability.
+        Clusters can form "cells."
+    </p>
+
+    <div id="messageBox"></div>
+
+    <div class="settings-panel">
+        <div>
+            <label for="numProtons">Protons (Blue):</label>
+            <input type="number" id="numProtons" value="50" min="10" max="200">
+        </div>
+        <div>
+            <label for="numElectrons">Electrons (Green):</label>
+            <input type="number" id="numElectrons" value="70" min="10" max="200">
+        </div>
+        <div>
+            <label for="numNeutrons">Neutrons (Red):</label>
+            <input type="number" id="numNeutrons" value="40" min="10" max="200">
+        </div>
+        <div>
+            <label for="attractionStrength">Attraction:</label>
+            <input type="range" id="attractionStrength" min="0.01" max="0.5" step="0.01" value="0.1">
+        </div>
+         <div>
+            <label for="friction">Friction:</label>
+            <input type="range" id="friction" min="0.8" max="0.99" step="0.01" value="0.95">
+        </div>
+    </div>
+
+    <canvas id="simulationCanvas"></canvas>
+
+    <div class="controls">
+        <button id="startButton" class="control-button">Start</button>
+        <button id="stopButton" class="control-button">Stop</button>
+        <button id="resetButton" class="control-button">Reset</button>
+    </div>
+
+    <script>
+        // Get canvas and context
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // DOM Elements for controls and settings
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const resetButton = document.getElementById('resetButton');
+        const messageBox = document.getElementById('messageBox');
+
+        const numProtonsInput = document.getElementById('numProtons');
+        const numElectronsInput = document.getElementById('numElectrons');
+        const numNeutronsInput = document.getElementById('numNeutrons');
+        const attractionStrengthInput = document.getElementById('attractionStrength');
+        const frictionInput = document.getElementById('friction');
+
+        // Simulation parameters
+        let particles = [];
+        let animationFrameId = null;
+        let isRunning = false;
+
+        // Default simulation settings
+        let PARTICLE_COUNT_PROTONS = 50;
+        let PARTICLE_COUNT_ELECTRONS = 70;
+        let PARTICLE_COUNT_NEUTRONS = 40;
+        let ATTRACTION_STRENGTH = 0.1; // General attraction multiplier
+        let REPULSION_STRENGTH = 0.5;
+        let ELECTRON_REPULSION_STRENGTH = 1.5; // Electrons repel each other more strongly
+        let FRICTION = 0.95; // Velocity damping factor
+        const PARTICLE_RADIUS = 4;
+        const INTERACTION_RADIUS_ATTRACT = 80; // Radius within which particles attract
+        const INTERACTION_RADIUS_REPEL = PARTICLE_RADIUS * 2.5; // Radius for close-range repulsion
+        const MAX_SPEED = 3;
+
+        // Particle types and their properties
+        const PARTICLE_TYPES = {
+            PROTON: { color: 'rgba(59, 130, 246, 0.8)', mass: 1.2, id: 'proton' }, // Blue
+            ELECTRON: { color: 'rgba(16, 185, 129, 0.8)', mass: 0.8, id: 'electron' }, // Green
+            NEUTRON: { color: 'rgba(239, 68, 68, 0.8)', mass: 1.0, id: 'neutron' }  // Red
+        };
+
+        // Function to display messages
+        function showMessage(message, duration = 3000) {
+            messageBox.textContent = message;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, duration);
+        }
+
+        // Particle class
+        class Particle {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.radius = PARTICLE_RADIUS;
+                this.color = type.color;
+                this.mass = type.mass;
+                this.vx = (Math.random() - 0.5) * 2; // Random initial velocity
+                this.vy = (Math.random() - 0.5) * 2;
+            }
+
+            // Draw the particle on the canvas
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            // Update particle position based on velocity and apply forces
+            update(deltaTime = 1) { // deltaTime can be used for frame-rate independent physics
+                // Apply friction
+                this.vx *= FRICTION;
+                this.vy *= FRICTION;
+
+                // Limit speed
+                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                if (speed > MAX_SPEED) {
+                    this.vx = (this.vx / speed) * MAX_SPEED;
+                    this.vy = (this.vy / speed) * MAX_SPEED;
+                }
+
+                // Update position
+                this.x += this.vx * deltaTime;
+                this.y += this.vy * deltaTime;
+
+                // Boundary collision (bounce off walls)
+                if (this.x - this.radius < 0) {
+                    this.x = this.radius;
+                    this.vx *= -0.7; // Dampen bounce
+                } else if (this.x + this.radius > canvas.width) {
+                    this.x = canvas.width - this.radius;
+                    this.vx *= -0.7;
+                }
+                if (this.y - this.radius < 0) {
+                    this.y = this.radius;
+                    this.vy *= -0.7;
+                } else if (this.y + this.radius > canvas.height) {
+                    this.y = canvas.height - this.radius;
+                    this.vy *= -0.7;
+                }
+            }
+        }
+
+        // Function to calculate interactions between particles
+        function handleInteractions() {
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const p1 = particles[i];
+                    const p2 = particles[j];
+
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    let forceX = 0;
+                    let forceY = 0;
+
+                    // Universal short-range repulsion to prevent overlap
+                    if (distance < INTERACTION_RADIUS_REPEL && distance > 0) {
+                        const forceMagnitude = REPULSION_STRENGTH * (INTERACTION_RADIUS_REPEL - distance) / distance;
+                        forceX -= forceMagnitude * (dx / distance);
+                        forceY -= forceMagnitude * (dy / distance);
+                    }
+
+                    // Specific interaction rules
+                    if (distance < INTERACTION_RADIUS_ATTRACT && distance > INTERACTION_RADIUS_REPEL) {
+                        // Protons attract Electrons and Neutrons
+                        if (p1.type.id === 'proton' && (p2.type.id === 'electron' || p2.type.id === 'neutron')) {
+                            const forceMagnitude = ATTRACTION_STRENGTH / distance;
+                            forceX += forceMagnitude * (dx / distance);
+                            forceY += forceMagnitude * (dy / distance);
+                        }
+                        if (p2.type.id === 'proton' && (p1.type.id === 'electron' || p1.type.id === 'neutron')) {
+                            const forceMagnitude = ATTRACTION_STRENGTH / distance;
+                            forceX -= forceMagnitude * (dx / distance); // Force on p1 is opposite
+                            forceY -= forceMagnitude * (dy / distance);
+                        }
+
+                        // Electrons repel each other strongly
+                        if (p1.type.id === 'electron' && p2.type.id === 'electron') {
+                            const forceMagnitude = ELECTRON_REPULSION_STRENGTH / distance;
+                             // Repulsive force, so it's negative of attraction direction
+                            forceX -= forceMagnitude * (dx / distance);
+                            forceY -= forceMagnitude * (dy / distance);
+                        }
+                    }
+                    
+                    // Apply forces (accelerations) considering mass
+                    // F = ma => a = F/m
+                    p1.vx += forceX / p1.mass;
+                    p1.vy += forceY / p1.mass;
+                    p2.vx -= forceX / p2.mass; // Newton's third law: equal and opposite force
+                    p2.vy -= forceY / p2.mass;
+                }
+            }
+        }
+
+
+        // Initialize the simulation
+        function init() {
+            // Set canvas dimensions
+            // Make canvas responsive to window size with a max width/height
+            const maxWidth = 800;
+            const maxHeight = 600;
+            const aspectRatio = maxWidth / maxHeight;
+            
+            let newWidth = window.innerWidth * 0.9;
+            if (document.body.clientWidth < 768) { // Smaller screens
+                 newWidth = window.innerWidth * 0.95;
+            }
+            let newHeight = newWidth / aspectRatio;
+
+            if (newWidth > maxWidth) newWidth = maxWidth;
+            if (newHeight > maxHeight) {
+                newHeight = maxHeight;
+                newWidth = newHeight * aspectRatio; // Recalculate width if height is capped
+            }
+            
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+
+
+            // Get settings from input fields
+            PARTICLE_COUNT_PROTONS = parseInt(numProtonsInput.value);
+            PARTICLE_COUNT_ELECTRONS = parseInt(numElectronsInput.value);
+            PARTICLE_COUNT_NEUTRONS = parseInt(numNeutronsInput.value);
+            ATTRACTION_STRENGTH = parseFloat(attractionStrengthInput.value);
+            FRICTION = parseFloat(frictionInput.value);
+
+            particles = []; // Clear existing particles
+
+            // Create Protons
+            for (let i = 0; i < PARTICLE_COUNT_PROTONS; i++) {
+                particles.push(new Particle(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    PARTICLE_TYPES.PROTON
+                ));
+            }
+            // Create Electrons
+            for (let i = 0; i < PARTICLE_COUNT_ELECTRONS; i++) {
+                particles.push(new Particle(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    PARTICLE_TYPES.ELECTRON
+                ));
+            }
+            // Create Neutrons
+            for (let i = 0; i < PARTICLE_COUNT_NEUTRONS; i++) {
+                particles.push(new Particle(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    PARTICLE_TYPES.NEUTRON
+                ));
+            }
+            showMessage('Simulation Reset!', 2000);
+        }
+
+        // Animation loop
+        function animate() {
+            if (!isRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+
+            handleInteractions(); // Calculate forces and update velocities
+
+            particles.forEach(particle => {
+                particle.update(); // Update positions and handle boundaries
+                particle.draw();   // Draw particles
+            });
+
+            animationFrameId = requestAnimationFrame(animate); // Request next frame
+        }
+
+        // Event listeners for controls
+        startButton.addEventListener('click', () => {
+            if (!isRunning) {
+                isRunning = true;
+                animate();
+                startButton.textContent = 'Pause';
+                startButton.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                startButton.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+                showMessage('Simulation Started!', 2000);
+            } else {
+                isRunning = false;
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+                startButton.textContent = 'Resume';
+                startButton.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+                startButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                showMessage('Simulation Paused.', 2000);
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            isRunning = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            startButton.textContent = 'Start';
+            startButton.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+            startButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+            showMessage('Simulation Stopped. Press Reset then Start.', 2000);
+            // Optionally clear canvas or leave it as is
+            // ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        resetButton.addEventListener('click', () => {
+            isRunning = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            init(); // Re-initialize particles and settings
+            // If you want to auto-start after reset, call start here
+            // Or, require user to press start again
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+            particles.forEach(p => p.draw()); // Draw initial state
+            startButton.textContent = 'Start';
+            startButton.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+            startButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+        });
+        
+        // Debounce function to limit resize event frequency
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        // Handle window resize to make canvas responsive
+        const handleResize = debounce(() => {
+            const wasRunning = isRunning;
+            if (isRunning) { // Pause simulation during resize
+                isRunning = false;
+                cancelAnimationFrame(animationFrameId);
+            }
+            
+            // Store particle relative positions
+            const relativePositions = particles.map(p => ({
+                x: p.x / (canvas.width || 1), // Avoid division by zero if canvas width is 0
+                y: p.y / (canvas.height || 1),
+                type: p.type,
+                vx: p.vx, // Keep velocities
+                vy: p.vy
+            }));
+
+            // Recalculate canvas size (same logic as in init)
+            const maxWidth = 800;
+            const maxHeight = 600;
+            const aspectRatio = maxWidth / maxHeight;
+            
+            let newWidth = window.innerWidth * 0.9;
+             if (document.body.clientWidth < 768) { // Smaller screens
+                 newWidth = window.innerWidth * 0.95;
+            }
+            let newHeight = newWidth / aspectRatio;
+
+            if (newWidth > maxWidth) newWidth = maxWidth;
+            if (newHeight > maxHeight) {
+                newHeight = maxHeight;
+                newWidth = newHeight * aspectRatio;
+            }
+            
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+
+            // Restore particles with new positions based on relative coordinates
+            particles = relativePositions.map(rp => {
+                const p = new Particle(rp.x * canvas.width, rp.y * canvas.height, rp.type);
+                p.vx = rp.vx; // Restore velocity
+                p.vy = rp.vy;
+                return p;
+            });
+            
+            // Redraw current state
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            particles.forEach(p => p.draw());
+
+            if (wasRunning) { // Resume simulation if it was running
+                isRunning = true;
+                animate();
+            }
+        }, 250); // 250ms debounce delay
+
+        window.addEventListener('resize', handleResize);
+
+        // Initial setup
+        // Call init() once DOM is fully loaded to ensure canvas dimensions are set correctly
+        window.onload = () => {
+            init(); // Initialize particles and settings
+            // Draw initial state but don't start animation yet
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            particles.forEach(p => p.draw());
+        };
+
+    </script>
+</body>
+</html>
